@@ -1,5 +1,7 @@
 const express = require('express');
 const mongoose = require('mongoose');
+const crypto = require('crypto');
+const multer = require('multer');
 
 const router = express.Router();
 const path = require('path');
@@ -8,16 +10,22 @@ const accountJson = require(path.resolve(__dirname, '../account/account.json'));
 const detailsJson = require('../account/details');
 
 const userSchema = new mongoose.Schema({
-    password: String,
-    nickname: String,
-    userId: String,
-    birthday: String,
-    introduction: String,
-    diamonds: Number,
-    gold: Number,
-    sex: Number,
-    picUrl: String,
-    vip: Number
+  password: String,
+  nickname: String,
+  userId: String,
+  birthday: String,
+  introduction: String,
+  diamonds: Number,
+  gold: Number,
+  sex: Number,
+  picUrl: String,
+  vip: Number,
+  clanName: mongoose.Schema.Types.Mixed,
+  clanId: mongoose.Schema.Types.Mixed,
+  clanInvites: mongoose.Schema.Types.Mixed,
+  friendRequests: mongoose.Schema.Types.Mixed,
+  friends: mongoose.Schema.Types.Mixed
+  
 });
 
 const User = mongoose.model('User', userSchema);
@@ -74,12 +82,16 @@ router.post('/api/v1/user/register', async (req, res) => {
 
     user.nickname = nickName;
     user.sex = sex;
-    user.picUrl = '';
-    user.birthday = '';
-    user.diamonds = 0;
-    user.introduction = '';
-    user.gold = 0;
-    user.vip = 0;
+    user.picUrl = 'https://static-blockmanplanet.vercel.app/profile.png';    
+    user.birthday = '2019-1-9';
+    user.diamonds = 1500;
+    user.introduction = 'Welcome to BP (Sorry for broken server)';        
+    user.friends = '';
+    user.gold = 1500;
+    user.clanId = '';
+    user.clanName = '';
+    user.friendRequests = '';
+    user.vip = 3;
 
     await user.save();
 
@@ -87,9 +99,13 @@ router.post('/api/v1/user/register', async (req, res) => {
         userId: userId,
         nickName: user.nickname,
         sex: user.sex, 
-        picUrl: user.picUrl, 
-        details: user.introduction,
+        picUrl: user.picUrl,        
+        details: user.introduction,    
         birthday: user.birthday,
+        clanName: user.clanName,
+        clanId: user.clanId,
+        friends: user.friends,
+        friendRequests: user.friendRequests,
         vip: user.vip, 
         expire: 0
     };
@@ -115,15 +131,72 @@ router.post('/api/v1/user/details/info', async (req, res) => {
         sex: user.sex || 2,
         nickName: user.nickname || '',
         birthday: user.birthday || '',
-        details: user.introduction || '',
-        diamonds: user.diamonds || 0,
-        golds: user.gold || 0,
+        clanId: user.clanId || '',
+        clanName: user.clanName || '',
+        details: user.introduction || 'Coin Go',
+        deviceUd: user.deviceId,                
+        diamonds: user.diamonds,
+        golds: user.gold,     
+        clanName: user.clanName,
+        clanId: user.clanId,                  
+        friendRequests: user.friendRequests,
+        friends: user.friends,
         picUrl: user.picUrl || '',
         hasPassword: true,
         stopToTime: null
     };
 
     res.status(200).json({ code: 1, message: 'SUCCESS', data: userInfo });
+});
+
+router.get('/api/v1/user/player/info', async (req, res) => {
+    const userId = req.headers['userid'];
+
+    if (!userId) {
+        return res.status(400).json({
+            code: 6,
+            message: 'Bad request: Missing required parameters',
+            data: null
+        });
+    }
+
+    try {
+        const user = await User.findOne({ userId });
+
+        if (!user) {
+            return res.status(404).json({
+                code: 7,
+                message: 'User not found',
+                data: null
+            });
+        }
+
+        const userInfo = {
+            userId: user.userId,
+            sex: user.sex || 2,
+            nickName: user.nickname || '',
+            birthday: user.birthday || '',            
+            details: user.introduction || 'Blockman Planet',
+            deviceId: user.deviceId,                        
+            friends: user.friend,                       
+            clanName: user.clanName,
+            clanId: user.clanId,
+            friendRequests: user.friendRequests,
+            picUrl: user.picUrl || ''
+        };
+
+        res.status(200).json({
+            code: 1,
+            message: 'SUCCESS',
+            data: userInfo
+        });
+    } catch (error) {
+        res.status(500).json({
+            code: 5,
+            message: 'Internal Server Error',
+            data: null
+        });
+    }
 });
 
 router.post('/api/v1/app/login', async (req, res) => {
@@ -161,6 +234,137 @@ router.post('/api/v1/app/login', async (req, res) => {
         },
         message: 'SUCCESS'
     });
+});
+
+router.post('/api/v1/user/password/modify', async (req, res) => {
+    const { oldPassword, newPassword } = req.body;
+    const userId = req.headers['userid']; 
+
+    if (!newPassword || newPassword.trim() === '') {
+        return res.status(400).json({ 
+            code: 1, 
+            message: 'New password cannot be empty', 
+            data: null 
+        });
+    }
+
+    try {
+        const user = await User.findOne({ userId });
+
+        if (!user) {
+            return res.status(404).json({ 
+                code: 1, 
+                message: 'User not found', 
+                data: null 
+            });
+        }
+
+        if (user.password !== oldPassword) {
+            return res.status(200).json({
+                code: 108, 
+                message: 'Incorrect old password', 
+                data: null
+            });
+        }
+
+        user.password = newPassword;
+        await user.save();
+
+       
+        return res.status(200).json({ 
+            code: 1, 
+            message: 'SUCCESS', 
+            data: {
+                userId: user.userId,
+                nickName: user.nickname,
+                diamonds: user.diamonds,
+                gold: user.gold,
+                picUrl: user.picUrl || '',
+                vip: user.vip
+            } 
+        });
+    } catch (err) {
+        return res.status(500).json({
+            code: 1, 
+            message: 'Server error', 
+            data: null
+        });
+    }
+});
+
+router.put('/api/v1/user/info', async (req, res) => {
+    const userId = req.headers.userid;
+    const details = req.body.details;
+    
+    const user = await User.findOne({ userId });
+    
+    if (!user) {
+            return res.status(404).json({ 
+                code: 1, 
+                message: 'User not found', 
+                data: null 
+            });
+    }
+    
+    user.introduction = details;
+    await user.save();
+    
+    const userInfo = {
+        userId: user.userId,
+        sex: user.sex || 2,
+        nickName: user.nickname,
+        birthday: user.birthday || '',
+        details: user.introduction,
+        diamonds: user.diamonds,
+        golds: user.gold,
+        picUrl: user.picUrl || '',
+        friends: user.friends,        
+        dressing: user.dressing || '',
+        clanName: user.clanName || '',
+        friendRequests: user.friendRequests || '',
+        clanId: user.clanId || '',
+        hasPassword: true,
+        stopToTime: null
+    };
+
+    res.status(200).json({ code: 1, message: 'SUCCESS', data: userInfo });
+});
+
+router.put('/api/v1/user/info', async (req, res) => {
+    const userId = req.headers.userid;
+    const details = req.body.details;
+    
+    const user = await User.findOne({ userId });
+    
+    if (!user) {
+            return res.status(404).json({ 
+                code: 1, 
+                message: 'User not found', 
+                data: null 
+            });
+    }
+    
+    user.introduction = details;
+    await user.save();
+    
+    const userInfo = {
+        userId: user.userId,
+        sex: user.sex || 2,
+        nickName: user.nickname,
+        birthday: user.birthday || '',
+        details: user.introduction,
+        diamonds: user.diamonds,
+        golds: user.gold,
+        picUrl: user.picUrl || '',
+        friends: user.friends,
+        friendRequests: user.friendRequests || '',
+        clanName: user.clanName || '',
+        clanId: user.clanId || '',
+        hasPassword: true,
+        stopToTime: null
+    };
+
+    res.status(200).json({ code: 1, message: 'SUCCESS', data: userInfo });
 });
 
 module.exports = router;
